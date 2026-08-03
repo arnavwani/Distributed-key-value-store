@@ -17,9 +17,9 @@ Inspired by the core ideas behind Raft consensus — implemented as a simplified
 Cluster surviving 17 rounds of random node kills and network partitions with zero data loss — key count stays flat at 5 across all three nodes throughout:
 
 
-![alt text](<Screenshot 2026-08-02 212023.png>)
+![dashboard screenshot](docs/dashboard-demo.png)
 
-![alt text](<Screenshot 2026-08-02 212113.png>)
+![chaos test chart](docs/chaos-run-chart.png)
 
 ## Architecture
 
