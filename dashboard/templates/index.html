@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>KV Store Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    margin: 20px;
+    color: #222;
+  }
+  h1 {
+    font-size: 20px;
+    margin-bottom: 4px;
+  }
+  h2 {
+    font-size: 15px;
+    margin-top: 24px;
+    margin-bottom: 8px;
+  }
+  #summary {
+    color: #555;
+    margin-bottom: 16px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    max-width: 700px;
+  }
+  th, td {
+    border: 1px solid #ccc;
+    padding: 6px 10px;
+    text-align: left;
+    font-size: 14px;
+  }
+  th {
+    background: #f2f2f2;
+  }
+  .LEADER { font-weight: bold; }
+  .UNREACHABLE { color: #b00020; }
+  #events {
+    max-width: 700px;
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #ccc;
+    padding: 8px 10px;
+    font-family: monospace;
+    font-size: 13px;
+  }
+  #events div {
+    padding: 3px 0;
+    border-bottom: 1px solid #eee;
+  }
+  canvas {
+    max-width: 700px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Distributed KV Store - Cluster Status</h1>
+<div id="summary">connecting...</div>
+
+<h2>Nodes</h2>
+<table>
+  <thead>
+    <tr><th>Node</th><th>Role</th><th>Term</th><th>Keys</th><th>Uptime (s)</th><th>Last Heartbeat (s ago)</th></tr>
+  </thead>
+  <tbody id="node-table-body"></tbody>
+</table>
+
+<h2>Key Count Over Time</h2>
+<canvas id="keyChart" height="120"></canvas>
+
+<h2>Chaos Event Log</h2>
+<div id="events"></div>
+
+<script>
+const POLL_MS = 2000;
+const nodeIds = [0, 1, 2];
+
+const keyChart = new Chart(document.getElementById('keyChart'), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: nodeIds.map(id => ({
+      label: 'node ' + id,
+      data: [],
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.2,
+      fill: false,
+    }))
+  },
+  options: {
+    responsive: true,
+    animation: false,
+    scales: { y: { beginAtZero: true } }
+  }
+});
+
+function renderTable(nodes) {
+  document.getElementById('node-table-body').innerHTML = nodes.map(n => `
+    <tr>
+      <td>${n.node_id}</td>
+      <td class="${n.role}">${n.role}</td>
+      <td>${n.term ?? '-'}</td>
+      <td>${n.key_count ?? '-'}</td>
+      <td>${n.uptime_s ?? '-'}</td>
+      <td>${n.last_heartbeat_age_s ?? '-'}</td>
+    </tr>
+  `).join('');
+}
+
+function describeEvent(e) {
+  if (e.phase === 'cluster_ready') return `cluster ready, leader = node ${e.leader}`;
+  if (e.phase === 'consistency_check') return `consistency check: ${e.consistent ? 'PASS' : 'FAIL'} (${(e.reachable_nodes || []).length} nodes compared)`;
+  if (e.phase === 'shutdown') return `chaos monkey stopped`;
+  const target = e.target !== undefined ? ` on node ${e.target}` : '';
+  return `${e.action || ''}${target} - ${e.phase}${e.duration_s ? ` (${e.duration_s}s)` : ''}${e.reason ? ` - ${e.reason}` : ''}`;
+}
+
+function renderEvents(events) {
+  document.getElementById('events').innerHTML = events.map(e =>
+    `<div>[round ${e.round ?? '-'}] ${describeEvent(e)}</div>`
+  ).join('') || '<div>waiting for chaos monkey events...</div>';
+}
+
+function updateChart(nodes) {
+  const label = new Date().toLocaleTimeString();
+  keyChart.data.labels.push(label);
+  if (keyChart.data.labels.length > 30) keyChart.data.labels.shift();
+  nodeIds.forEach((id, i) => {
+    const n = nodes.find(x => x.node_id === id);
+    const ds = keyChart.data.datasets[i];
+    ds.data.push(n && n.key_count != null ? n.key_count : null);
+    if (ds.data.length > 30) ds.data.shift();
+  });
+  keyChart.update();
+}
+
+async function poll() {
+  try {
+    const res = await fetch('/api/cluster-state');
+    const data = await res.json();
+    renderTable(data.nodes);
+    renderEvents(data.events);
+    updateChart(data.nodes);
+    const leader = data.nodes.find(n => n.role === 'LEADER');
+    document.getElementById('summary').textContent =
+      leader ? `Leader: node ${leader.node_id} (term ${leader.term})` : 'No leader elected';
+  } catch (e) {
+    document.getElementById('summary').textContent = 'Cannot reach dashboard backend';
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+</script>
+
+</body>
+</html>
